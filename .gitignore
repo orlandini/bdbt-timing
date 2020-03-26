@@ -1,0 +1,13 @@
+cmake-build-debug
+cmake-build-release
+*~
+/docs/mylittlengs
+*.o
+*.so
+.vs
+*out
+.DS_Store
+cmake-build-debug
+.vscode
+.idea
+*.icloud
