@@ -22,6 +22,7 @@
 #include <string>
 
 #include <blaze/math/DynamicMatrix.h>
+#include <blaze/math/HybridMatrix.h>
 #include <blaze/math/DiagonalMatrix.h>
 using blaze::rowMajor;
 using blaze::columnMajor;
@@ -126,7 +127,7 @@ int main(int argc, char **argv)
     std::cout<<std::endl<<std::endl<<std::endl;
     std::cout<<"Computing Element Matrices using traditional CalcStiff"<<std::endl;
     {
-        STATE res{0}; 
+        STATE res{0};
         const auto assemble_tick_b = __rdtsc();
         for(const auto& cel : cMesh->ElementVec()){
             if(cel->Dimension() != dim) continue;
@@ -135,12 +136,10 @@ int main(int argc, char **argv)
             res+=ek.fMat(0,0);
         }
         const auto assemble_tick_e = __rdtsc();
-        std::cout<<"\tsum ek(0,0) = "<<res<<std::endl;
-        typedef std::numeric_limits< double > dbl;
-        std::cout.precision(dbl::max_digits10);
+        std::cout<<std::setw(8)<<"\tsum ek(0,0) = "<<res<<std::endl;
         std::cout<<"\t****************************************"<<std::endl;
         std::cout <<"\tTotal time: "<<((double)(assemble_tick_e-assemble_tick_b))*seconds_per_tick<<std::endl;
-        std::cout <<"\tTotal clocks: "<<(assemble_tick_e-assemble_tick_b)<<std::endl;
+        std::cout <<"\tTotal MClock Cycles: "<<(assemble_tick_e-assemble_tick_b)/1e6<<std::endl;
         std::cout<<"\t****************************************"<<std::endl;
     }
     std::cout<<"Computing Element Matrices using BDBt (naive matrix mult)"<<std::endl;
@@ -151,8 +150,10 @@ int main(int argc, char **argv)
             const auto cel = dynamic_cast<TPZInterpolationSpace *>(iCel);
             if(iCel->Dimension() != dim || cel == nullptr) continue;
             TPZElementMatrix ek, ef;
-            TPZFNMatrix<5000,STATE>phi,dphi;
-            TPZFNMatrix<2400, STATE> bMat, dMat;
+            TPZFNMatrix<60,STATE>phi;
+            TPZFNMatrix<180,STATE>dphi;
+            TPZFNMatrix<10000, STATE> bMat;
+            TPZFNMatrix<25000, STATE> dMat;
             auto material = dynamic_cast<TPZMatMassMatrix *>(cel->Material());
             cel->InitializeElementMatrix(ek,ef);
             if (cel->NConnects() == 0) break;
@@ -193,23 +194,22 @@ int main(int argc, char **argv)
             res+=ek.fMat(0,0);
         }
         const auto assemble_tick_e = __rdtsc();
-        std::cout<<"\tsum ek(0,0) = "<<res<<std::endl;
-        typedef std::numeric_limits< double > dbl;
-        std::cout.precision(dbl::max_digits10);
+        std::cout<<std::setw(8)<<"\tsum ek(0,0) = "<<res<<std::endl;
         std::cout<<"\t****************************************"<<std::endl;
         std::cout <<"\tTotal time: "<<((double)(assemble_tick_e-assemble_tick_b))*seconds_per_tick<<std::endl;
-        std::cout <<"\tTotal clocks: "<<(assemble_tick_e-assemble_tick_b)<<std::endl;
+        std::cout <<"\tTotal MClock Cycles: "<<(assemble_tick_e-assemble_tick_b)/1e6<<std::endl;
         std::cout<<"\t****************************************"<<std::endl;
     }
 
-    std::cout<<"Computing Element Matrices using BDBt (blaze)"<<std::endl;
+    std::cout<<"Computing Element Matrices using BDBt (blaze::DynamicMatrix)"<<std::endl;
     {
         STATE res{0};
         const auto assemble_tick_b = __rdtsc();
         for(const auto& iCel : cMesh->ElementVec()){
             const auto cel = dynamic_cast<TPZInterpolationSpace *>(iCel);
             if(iCel->Dimension() != dim || cel == nullptr) continue;
-            TPZFNMatrix<5000,STATE>phi,dphi;
+            TPZFNMatrix<60,STATE>phi;
+            TPZFNMatrix<180,STATE>dphi;
             auto material = dynamic_cast<TPZMatMassMatrix *>(cel->Material());
             if (cel->NConnects() == 0) break;
 
@@ -242,12 +242,58 @@ int main(int argc, char **argv)
             res+=ek(0,0);
         }
         const auto assemble_tick_e = __rdtsc();
-        std::cout<<"\tsum ek(0,0) = "<<res<<std::endl;
-        typedef std::numeric_limits< double > dbl;
-        std::cout.precision(dbl::max_digits10);
+        std::cout<<std::setw(8)<<"\tsum ek(0,0) = "<<res<<std::endl;
         std::cout<<"\t****************************************"<<std::endl;
         std::cout <<"\tTotal time: "<<((double)(assemble_tick_e-assemble_tick_b))*seconds_per_tick<<std::endl;
-        std::cout <<"\tTotal clocks: "<<(assemble_tick_e-assemble_tick_b)<<std::endl;
+        std::cout <<"\tTotal MClock Cycles: "<<(assemble_tick_e-assemble_tick_b)/1e6<<std::endl;
+        std::cout<<"\t****************************************"<<std::endl;
+    }
+
+    std::cout<<"Computing Element Matrices using BDBt (blaze::HybridMatrix)"<<std::endl;
+    {
+        STATE res{0};
+        const auto assemble_tick_b = __rdtsc();
+        for(const auto& iCel : cMesh->ElementVec()){
+            const auto cel = dynamic_cast<TPZInterpolationSpace *>(iCel);
+            if(iCel->Dimension() != dim || cel == nullptr) continue;
+            TPZFNMatrix<60,STATE>phi;
+            TPZFNMatrix<180,STATE>dphi;
+            auto material = dynamic_cast<TPZMatMassMatrix *>(cel->Material());
+            if (cel->NConnects() == 0) break;
+
+            TPZAutoPointer<TPZIntPoints> intrule = cel->GetIntegrationRule().Clone();
+            const auto n_int_points = intrule->NPoints();
+            const auto dim1 = cel->NShapeF();
+            const auto dim2 = n_int_points;
+            //HybridMatrix<double,5UL,9UL> M7( 3UL, 7UL );
+            blaze::HybridMatrix<STATE,60,150,blaze::columnMajor,blaze::unaligned,blaze::unpadded> bMat(dim1,dim2);
+            blaze::DiagonalMatrix< blaze::HybridMatrix<STATE,150,150,blaze::columnMajor,blaze::unaligned,blaze::unpadded> > dMat(dim2,dim2);
+
+            phi.Resize(dim1,1);
+            dphi.Resize(3,dim1);
+            const int celDim = cel->Dimension();
+            TPZManVector<REAL,3> intpoint(celDim,0.);
+            REAL weight = 0.;
+            STATE constitutiveParam = 0;
+            material->GetDiffusiveParameter(constitutiveParam);
+            REAL detjac{0};
+            TPZFMatrix<REAL> jac(dim,dim),axes(dim,dim),jacinv(dim,dim);
+            for(int ipt = 0; ipt < dim2; ++ipt){
+                intrule->Point(ipt,intpoint,weight);
+                cel->Shape(intpoint,phi,dphi);
+                cel->Reference()->Jacobian(intpoint,jac,axes,detjac,jacinv);
+                dMat(ipt,ipt) = weight * fabs(detjac) * constitutiveParam;
+                memcpy(&bMat.data()[ipt*bMat.spacing()],phi.Adress(),bMat.spacing()*sizeof(STATE));
+            }
+//            blaze::DynamicMatrix<STATE> ek = bMat * dMat * trans(bMat);
+            auto ek = bMat * dMat * trans(bMat);
+            res+=ek(0,0);
+        }
+        const auto assemble_tick_e = __rdtsc();
+        std::cout<<std::setw(8)<<"\tsum ek(0,0) = "<<res<<std::endl;
+        std::cout<<"\t****************************************"<<std::endl;
+        std::cout <<"\tTotal time: "<<((double)(assemble_tick_e-assemble_tick_b))*seconds_per_tick<<std::endl;
+        std::cout <<"\tTotal MClock Cycles: "<<(assemble_tick_e-assemble_tick_b)/1e6<<std::endl;
         std::cout<<"\t****************************************"<<std::endl;
     }
 
